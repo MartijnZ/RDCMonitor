@@ -134,3 +134,189 @@ Copy and paste this summary into a new chat when you resume. It provides enough 
 
 
 ```
+
+
+## Where I Left of (2-11-2025)
+
+Here’s a clear, **checkpoint summary** of what you’ve done and what remains to get your Raspberry Pi ready for the reed-switch speed sensor and FastAPI app.
+
+---
+
+## 🧩 System setup checklist
+
+### 1. OS & updates
+
+```bash
+sudo apt update && sudo apt full-upgrade -y
+```
+
+Use **Raspberry Pi OS Bookworm 64-bit** or later.
+
+---
+
+### 2. Python environment
+
+```bash
+cd /opt
+sudo mkdir rpi-sensor-node && sudo chown pi:pi rpi-sensor-node
+cd rpi-sensor-node
+python3 --version       # should show 3.11.x
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+```
+
+---
+
+### 3. Core dependencies
+
+```bash
+pip install "uvicorn[standard]" fastapi pydantic pydantic-settings orjson structlog numpy scipy aiosqlite aiohttp
+```
+
+*(you can later freeze this to `requirements.txt`)*
+
+---
+
+### 4. GPIO support
+
+Since Raspberry Pi OS Bookworm moved to the **libgpiod / lgpio** interface, skip `pigpio` unless you need DMA timing.
+
+Install:
+
+```bash
+sudo apt install -y python3-lgpio python3-gpiozero
+sudo adduser $USER gpio
+# log out and back in (or reboot)
+```
+
+Check:
+
+```bash
+ls -l /dev/gpiochip*
+groups     # should include 'gpio'
+```
+
+Optional (explicit):
+
+```bash
+export GPIOZERO_PIN_FACTORY=lgpio
+```
+
+---
+
+### 5. Wiring (confirmed correct)
+
+| Sensor lead                                  | Pi connection         | Notes     |
+| -------------------------------------------- | --------------------- | --------- |
+| 1                                            | GPIO 23 (BCM, pin 16) | Input pin |
+| 2                                            | GND (pin 6 or 14)     | Ground    |
+| Enable pull-up in software (`pull_up=True`). |                       |           |
+
+---
+
+### 6. Quick test script
+
+Use this (works with `gpiozero + lgpio`):
+
+```python
+from gpiozero import Button
+from signal import pause
+import time
+
+GPIO_PIN = 23
+CIRCUMFERENCE_M = 2.1
+
+btn = Button(GPIO_PIN, pull_up=True, bounce_time=0.01)
+last = None
+count = 0
+
+def on_pulse():
+    global last, count
+    t = time.monotonic()
+    if last:
+        dt = t - last
+        freq = 1/dt
+        speed = CIRCUMFERENCE_M * freq
+        print(f"Pulse {count:4d}: {freq:6.2f} Hz  {speed:6.2f} m/s")
+    else:
+        print("First pulse detected")
+    last = t
+    count += 1
+
+btn.when_pressed = on_pulse
+print("Listening on GPIO 23… Ctrl+C to stop")
+pause()
+```
+
+Run:
+
+```bash
+python3 test_reed_gpiozero.py
+```
+
+Expected: every magnet pass prints a pulse line.
+
+---
+
+### 7. FastAPI application (for later)
+
+Once GPIO works, run your service:
+
+```bash
+source .venv/bin/activate
+python run_server.py   # or ./run_server.sh
+```
+
+Access from another machine:
+
+```
+http://<pi-ip>:8000/api/health
+ws://<pi-ip>:8000/ws
+```
+
+---
+
+### 8. (Optional) systemd service
+
+`/etc/systemd/system/rpi-sensor-node.service`
+
+```ini
+[Unit]
+Description=RPi Sensor Node
+After=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/opt/rpi-sensor-node
+ExecStart=/opt/rpi-sensor-node/.venv/bin/python run_server.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now rpi-sensor-node
+```
+
+---
+
+### 9. Current status
+
+✅  OS and Python env ready
+✅  Dependencies installed
+✅  Wiring correct
+🚧  GPIO library fallback fixed by installing `python3-lgpio` and using system Python 3.11
+🚧  Next step: confirm pulses appear with the test script before returning to FastAPI integration.
+
+---
+
+When you come back:
+
+1. Verify the test script prints pulses.
+2. If it does, we’ll switch the `Speedometer` driver to use `gpiozero` instead of `pigpio`.
+3. Then you can re-enable your FastAPI service with real data streaming.
