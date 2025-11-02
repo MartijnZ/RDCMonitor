@@ -7,7 +7,8 @@ except ImportError:
 class Speedometer:
 
     def __init__(self, gpio_a:int, gpio_b:int|None=None, pulses_per_rev:int=20, wheel_circ_m:float=1.0):
-        self.gpio_a = gpio_a; self.gpio_b = gpio_b
+        self.gpio_a = gpio_a
+        self.gpio_b = gpio_b
         self.ppr = pulses_per_rev; self.circ = wheel_circ_m
         self._queue = asyncio.Queue(maxsize=1000)
         self._pi = None

@@ -1,5 +1,5 @@
 import asyncio, json
-from evdev import InputDevice, categorize, ecodes
+#from evdev import InputDevice, categorize, ecodes
 
 class QRScanner:
 

@@ -1,11 +1,13 @@
 import asyncio, uvicorn
+import contextlib
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from .config import Settings
 #from .logging import setup_logging
 from .services.bus import Bus
 from .drivers.speedometer import Speedometer
-from .drivers.qr_scanner import QRScanner
+from .drivers.speedometer_sim import SpeedometerSim
+#from .drivers.qr_scanner import QRScanner
 #from .drivers.hat_adc import HatADC
 from .services.speed_service import SpeedService
 #from .services.vib_service import VibService
@@ -19,11 +21,19 @@ async def _state_updater(speed_q, state: State):
         state.latest_speed = item
 
 
-def create_app(settings: Settings) -> FastAPI:
+def _make_speed_driver(settings: Settings):
+    if settings.simulate_speed:
+        return SpeedometerSim()
+    # real hardware (Pi only)
+    return Speedometer(settings.speed_gpio_a, settings.speed_gpio_b)
+
+
+def create_app() -> FastAPI:
+    settings = Settings()
     bus = Bus()
     state = State()
 
-    speed_drv = Speedometer(settings.speed_gpio_a, settings.speed_gpio_b)
+    speed_drv = _make_speed_driver(settings)
     speed_srv = SpeedService(speed_drv, bus)
     speed_q = bus.subscribe("speed")
 
@@ -51,8 +61,7 @@ def create_app(settings: Settings) -> FastAPI:
     return app
 
 if __name__ == "__main__":
-    settings = Settings()
-    uvicorn.run(create_app(settings), host=settings.api_host, port=settings.api_port)
+    uvicorn.run(create_app(), host=settings.api_host, port=settings.api_port)
 
 #async def run():
 #    settings = Settings()

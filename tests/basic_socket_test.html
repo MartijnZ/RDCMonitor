@@ -1,0 +1,52 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Speed Viewer (Minimal)</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; }
+  #status { font-weight: 600; }
+  #speed { font-size: 2rem; font-weight: 700; margin-top: 8px; }
+  #sub { color: #555; }
+</style>
+
+<h1>Speed Viewer</h1>
+<div id="status">connecting…</div>
+<div id="speed">— m/s</div>
+<div id="sub">— km/h</div>
+
+<script>
+  // Hardcode your endpoint here.
+  // If your server route is /api/ws (instead of /ws), change it accordingly.
+  const ENDPOINT = "ws://127.0.0.1:8000/ws";
+
+  const statusEl = document.getElementById('status');
+  const speedEl  = document.getElementById('speed');
+  const subEl    = document.getElementById('sub');
+
+  function setStatus(text, color='#444') {
+    statusEl.textContent = text;
+    statusEl.style.color = color;
+  }
+
+  function connect() {
+    const ws = new WebSocket(ENDPOINT);
+    ws.onopen = () => setStatus('connected', '#2d6a4f');
+    ws.onclose = () => setStatus('disconnected', '#b23a48');
+    ws.onerror = () => setStatus('error', '#b23a48');
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        // Accept either {topic:"speed", payload:{speed_mps}} or just {speed_mps}
+        const payload = msg.payload && msg.topic === 'speed' ? msg.payload : msg;
+        const v = Number(payload.speed_mps);
+        if (!Number.isFinite(v)) return;
+        speedEl.textContent = v.toFixed(2) + " m/s";
+        subEl.textContent = (v * 3.6).toFixed(2) + " km/h";
+      } catch (e) {
+        console.warn('bad message', e);
+      }
+    };
+  }
+
+  connect();
+</script>
