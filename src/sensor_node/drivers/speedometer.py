@@ -2,7 +2,7 @@ import asyncio, time
 try:
     import gpiozero
 except ImportError:
-    pigpio = None
+    gpiozero = None
 
 class Speedometer:
 
