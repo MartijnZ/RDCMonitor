@@ -1,9 +1,12 @@
 import asyncio, uvicorn
 import contextlib
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+
+
+
 from .config import Settings
-#from .logging import setup_logging
 from .services.bus import Bus
 from .drivers.speedometer import Speedometer
 from .drivers.speedometer_sim import SpeedometerSim
@@ -14,6 +17,34 @@ from .services.speed_service import SpeedService
 from .services.uploader import Uploader
 from .services.state import State
 from .app import api, ws
+
+
+# ---- logging setup -------------------------------------------------
+
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+
+def setup_logging() -> None:
+    """
+    Configure global logging for the backend.
+    Call this exactly once at startup.
+    """
+    logging.basicConfig(
+        level=logging.INFO,        # default level for everything
+        format=LOG_FORMAT,
+    )
+
+    # Make Speedometer extra chatty when you need it
+    # Adjust this string to match the logger name you used in speedometer.py
+    # If in speedometer.py you did: logger = logging.getLogger(__name__)
+    # and your package is "myapp", full name will be "myapp.drivers.speedometer"
+    logging.getLogger("myapp.drivers.speedometer").setLevel(logging.INFO)
+
+    # Optional: keep uvicorn access logs at INFO but reduce its internal noise
+    logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+
+
+# -------------------------------------------------------------------------
 
 async def _state_updater(speed_q, state: State):
     while True:
@@ -61,6 +92,7 @@ def create_app() -> FastAPI:
     return app
 
 if __name__ == "__main__":
+    setup_logging()
     settings = Settings()
     uvicorn.run(create_app(), host=settings.api_host, port=settings.api_port)
 

@@ -3,6 +3,193 @@
 ## Development Environment
 
 
+## PI
+
+## NGIX Server & Universal Firewall
+
+Install `nginx`
+```commandline
+sudo apt install -y nginx
+```
+
+Setup ufw:
+```commandline
+sudo apt install -y ufw
+
+# Allow SSH so you don’t lock yourself out
+sudo ufw allow 22/tcp
+
+# Allow HTTP and HTTPS for Nginx
+sudo ufw allow 'Nginx Full'   # opens 80 and 443
+
+# (Optional) if you use a custom FastAPI port directly
+sudo ufw allow 8000/tcp
+
+# Enable the firewall
+sudo ufw enable
+```
+
+```commandline
+sudo ufw status verbose
+```
+
+Deploy nginx
+```commandline
+sudo cp /opt/rdcmonitor/deploy/nginx/rdc-monitor.conf /etc/nginx/sites-available/
+sudo ln -s /etc/nginx/sites-available/rdc-monitor.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Create `rdc-monitor.conf` (also in git under `scripts`)
+```commandline
+server {
+  listen 80;
+  listen [::]:80;
+  server_name _;
+
+  root /var/www/rdc-monitor;
+  index index.html;
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+
+  # WebSocket → FastAPI on localhost
+  location /ws {
+    proxy_pass http://127.0.0.1:8000/ws;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 3600;
+  }
+
+  # Optional REST proxy
+  location /api/ {
+    proxy_pass http://127.0.0.1:8000/api/;
+  }
+}
+
+```
+
+Make symbolic link to sites-enabled:
+```commandline
+sudo ln -s /etc/nginx/sites-available/rdc-monitor.conf /etc/nginx/sites-enabled/rdc-monitor.conf
+sudo rm -f /etc/nginx/sites-enabled/default
+```
+
+
+## Setup Front-end and Backend
+
+### Pull Git repository
+```commandline
+sudo mkdir -p /opt/rdc-monitor
+sudo chown -R martijn:martijn /opt/rdc-monitor
+git clone git@github.com:MartijnZ/RDCMonitor.git
+```
+
+### Install Python Dependencies
+```commandline
+cd /opt/rdc-monitor
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt 
+```
+
+### Setup back-end service:
+
+
+Create a file ``
+
+```commandline
+[Unit]
+Description=RDC Monitor backend (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rdc
+Group=rdc
+WorkingDirectory=/opt/rdc-monitor
+EnvironmentFile=/opt/rdc-monitor/.env # This might be an issue
+Environment=PYTHONUNBUFFERED=1
+
+# If your entrypoint is a Python module:
+ExecStart=/opt/rdc-monitor/.venv/bin/python -m src.sensor_node.main
+
+# If you run uvicorn directly instead, comment the line above and use:
+# ExecStart=/opt/rdc-monitor/.venv/bin/uvicorn sensor_node.app.api:app --host 127.0.0.1 --port 8000 --workers 1
+
+Restart=on-failure
+RestartSec=3
+
+# Hardening (safe defaults for a web service)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/rdc-monitor
+# If you write logs/data elsewhere, add them to ReadWritePaths
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Setup npm and nodejs
+
+```commandline
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+Validate:
+```commandline
+node -v # expect v20.19.5
+npm -v # expect 10.8.2
+```
+
+Build:
+```commandline
+npm i -D @sveltejs/adapter-static    # Install adapter-static
+npm ci        # Install dependencies exactly as in packag-lock.json
+```
+
+Make the following modifications:
+1. Create a file `+layout.ts` in `/src/routes/` with the content:
+```commandline
+export const prerender = true;
+```
+2. In svelte.config.js `@sveltejs/adapter-auto` to `@sveltejs/adapter-static`
+
+Then Build:
+```
+npm run build # compile static UI into build
+```
+and a `build` folder is created, copy it to the nginx folder:
+
+Create web root:
+```commandline
+sudo mkdir -p /var/www/rdc-monitor/releases
+sudo chown -R martijn:martijn /var/www/rdc-monitor
+```
+
+
+```commandline
+ls -lah /var/www/rdc-monitor
+# if empty, deploy them:
+cd /opt/rdc-monitor/frontend
+npm run build
+sudo rsync -a --delete build/ /var/www/rdc-monitor/
+sudo chown -R www-data:www-data /var/www/rdc-monitor
+```
+
+Test nginx & reload
+```commandline
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
 ### Node LTS 
 
 ##### Windows
