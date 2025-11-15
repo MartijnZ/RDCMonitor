@@ -1,5 +1,6 @@
 import asyncio, time
 import logging
+from sensor_node.processing.lp_filter import RpmLowPassFilter
 try:
     import gpiozero
 except ImportError:
@@ -11,8 +12,9 @@ logger = logging.getLogger(__name__)
 class Speedometer:
 
     def __init__(self, gpio_a:int, gpio_b:int|None=None, pulses_per_rev:int=1, wheel_circ_m:float=1.0,
-                 idle_timeout_s:float=2.0,
-                 debounce_s: float=0.01):
+                 idle_timeout_s:float=4.0,
+                 debounce_s: float=0.01,
+                 lp_tau_ts: float | None = 2.0):
         self.gpio_a = gpio_a
         self.gpio_b = gpio_b
         self.ppr = pulses_per_rev
@@ -21,6 +23,7 @@ class Speedometer:
         self.debounce_s = debounce_s
 
         self._queue: asyncio.Queue[tuple[int, float]] = asyncio.Queue(maxsize=1000)
+        self._filter: RpmLowPassFilter | None = (RpmLowPassFilter(lp_tau_ts) if lp_tau_ts is not None else None)
         self._btn: gpiozero.Button | None = None
         self._last_ns: int | None = None
         self._idle_task: asyncio.Task | None = None
@@ -28,12 +31,13 @@ class Speedometer:
         self._sent_zero = False  # prevents spamming zeros
 
         logger.info(
-            "Speedometer initialized on GPIO %s (ppr=%s, circ=%.3f m, idle_timeout=%.2fs, debounce=%.3fs)",
+            "Speedometer initialized on GPIO %s (ppr=%s, circ=%.3f m, idle_timeout=%.2fs, debounce=%.3fs, lp_tau=%s)",
             self.gpio_a,
             self.ppr,
             self.circ,
             self.idle_timout_s,
             self.debounce_s,
+            lp_tau_ts,
         )
 
     async def start(self):
@@ -57,6 +61,10 @@ class Speedometer:
             dt = (now - self._last_ns) / 1e9
             rev_per_s = (1.0/dt)/self.ppr
             rpm = rev_per_s * 60
+
+            if self._filter:
+                rpm = self._filter.update(rpm, now)
+
             #speed = rev_per_s * self.circ
             try: self._queue.put_nowait((now, rpm))
             except asyncio.QueueFull:
@@ -75,9 +83,17 @@ class Speedometer:
                 continue
             except asyncio.TimeoutError:
                 if self._last_ns is not None and not self._sent_zero:
+
+                    now_ns= time.monotonic_ns()
+                    rpm = 0.0
+
+                    if self._filter:
+                        rpm = self._filter.update(rpm, now_ns)
+
+
                     logger.debug("Idle timeout reached; enqueueing zero rpm")
                     try:
-                        self._queue.put_nowait((time.monotonic_ns(),0.0))
+                        self._queue.put_nowait((now_ns,rpm))
                     except asyncio.QueueFull:
                         logger.warning("Speedometer queue full; dropping idle zero")
                 self._sent_zero=True
